@@ -32,15 +32,18 @@ const (
 
 	NodeDefaultNonListedNodes = "DEFAULT_PATH_FOR_NON_LISTED_NODES"
 
-	PVDirPrefixAnnotation = "ahuh.fork/pv-dir-prefix"
+	PVDirPrefixAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-prefix"
+	PVDirKeepAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-keep"
 
 	helperScriptDir     = "/script"
 	helperDataVolName   = "data"
 	helperScriptVolName = "script"
 
-	envVolDir  = "VOL_DIR"
-	envVolMode = "VOL_MODE"
-	envVolSize = "VOL_SIZE_BYTES"
+	envVolDir       = "VOL_DIR"
+	envVolMode      = "VOL_MODE"
+	envVolSize      = "VOL_SIZE_BYTES"
+	envVolDirPrefix = "VOL_DIR_PREFIX"
+	envVolDirKeep   = "VOL_DIR_KEEP"
 )
 
 const (
@@ -211,10 +214,19 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 	if err != nil {
 		return nil, err
 	}
+	
+	// Annotations to pass from PVC to PV
+	pvAnnotations := make(map[string]string)
+
+	if pvDirKeep, annotationExists := pvc.Annotations[PVDirKeepAnnotation]; annotationExists {
+		// Keep dir at teardown
+		pvAnnotations[PVDirKeepAnnotation] = pvDirKeep
+	}
 
 	var name, folderName string
-	if pvDirPrefix, ok := pvc.Annotations[PVDirPrefixAnnotation]; ok {
-		// Persistent volume
+	if pvDirPrefix, annotationExists := pvc.Annotations[PVDirPrefixAnnotation]; annotationExists {
+		// Persistent volume with specified prefix dir
+		pvAnnotations[PVDirPrefixAnnotation] = pvDirPrefix
 		name = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "-")
 		folderName = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "_")
 	} else {
@@ -234,6 +246,8 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 		Mode:        *pvc.Spec.VolumeMode,
 		SizeInBytes: storage.Value(),
 		Node:        node.Name,
+		DirPrefix:   pvAnnotations[PVDirPrefixAnnotation],
+		DirKeep:     pvAnnotations[PVDirKeepAnnotation],
 	}); err != nil {
 		return nil, err
 	}
@@ -249,6 +263,7 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 	return &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
+			Annotations: pvAnnotations,
 		},
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeReclaimPolicy: *opts.StorageClass.ReclaimPolicy,
@@ -302,6 +317,8 @@ func (p *LocalPathProvisioner) Delete(pv *v1.PersistentVolume) (err error) {
 			Mode:        *pv.Spec.VolumeMode,
 			SizeInBytes: storage.Value(),
 			Node:        node,
+			DirPrefix:   pv.Annotations[PVDirPrefixAnnotation],
+			DirKeep:     pv.Annotations[PVDirKeepAnnotation],
 		}); err != nil {
 			logrus.Infof("clean up volume %v failed: %v", pv.Name, err)
 			return err
@@ -359,6 +376,8 @@ type volumeOptions struct {
 	Mode        v1.PersistentVolumeMode
 	SizeInBytes int64
 	Node        string
+	DirPrefix   string
+	DirKeep     string
 }
 
 func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, o volumeOptions) (err error) {
@@ -426,6 +445,8 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 		{Name: envVolDir, Value: filepath.Join(parentDir, volumeDir)},
 		{Name: envVolMode, Value: string(o.Mode)},
 		{Name: envVolSize, Value: strconv.FormatInt(o.SizeInBytes, 10)},
+		{Name: envVolDirPrefix, Value: string(o.DirPrefix)},
+		{Name: envVolDirKeep, Value: string(o.DirKeep)},
 	}
 
 	// use different name for helper pods
