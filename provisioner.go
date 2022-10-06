@@ -32,6 +32,8 @@ const (
 
 	NodeDefaultNonListedNodes = "DEFAULT_PATH_FOR_NON_LISTED_NODES"
 
+	PVDirPrefixAnnotation = "ahuh.fork/pv-dir-prefix"
+
 	helperScriptDir     = "/script"
 	helperDataVolName   = "data"
 	helperScriptVolName = "script"
@@ -210,8 +212,16 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 		return nil, err
 	}
 
-	name := opts.PVName
-	folderName := strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	var name, folderName string
+	if pvDirPrefix, ok := pvc.Annotations[PVDirPrefixAnnotation]; ok {
+		// Persistent volume
+		name = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "-")
+		folderName = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	} else {
+		// Standard volume (non-persistent)
+		name = opts.PVName
+		folderName = strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	}
 
 	path := filepath.Join(basePath, folderName)
 	logrus.Infof("Creating volume %v at %v:%v", name, node.Name, path)
