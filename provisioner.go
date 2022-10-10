@@ -32,18 +32,21 @@ const (
 
 	NodeDefaultNonListedNodes = "DEFAULT_PATH_FOR_NON_LISTED_NODES"
 
-	PVDirPrefixAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-prefix"
+	AhuhForkReservedDirPrefix = "prefixDir"
+	AhuhForkReservedSubDir = "subDir"
+
+	PVDirReserveAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-reserve"
 	PVDirKeepAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-keep"
 
 	helperScriptDir     = "/script"
 	helperDataVolName   = "data"
 	helperScriptVolName = "script"
 
-	envVolDir       = "VOL_DIR"
-	envVolMode      = "VOL_MODE"
-	envVolSize      = "VOL_SIZE_BYTES"
-	envVolDirPrefix = "VOL_DIR_PREFIX"
-	envVolDirKeep   = "VOL_DIR_KEEP"
+	envVolDir        = "VOL_DIR"
+	envVolMode       = "VOL_MODE"
+	envVolSize       = "VOL_SIZE_BYTES"
+	envVolDirReserve = "VOL_DIR_RESERVE"
+	envVolDirKeep    = "VOL_DIR_KEEP"
 )
 
 const (
@@ -77,7 +80,8 @@ type NodePathMapData struct {
 }
 
 type ConfigData struct {
-	NodePathMap []*NodePathMapData `json:"nodePathMap,omitempty"`
+	NodePathMap               []*NodePathMapData `json:"nodePathMap,omitempty"`
+	AhuhForkReservedDir       map[string]string  `json:"ahuhForkReservedDir,omitempty"`
 
 	CmdTimeoutSeconds int `json:"cmdTimeoutSeconds,omitempty"`
 }
@@ -87,8 +91,9 @@ type NodePathMap struct {
 }
 
 type Config struct {
-	NodePathMap       map[string]*NodePathMap
-	CmdTimeoutSeconds int
+	NodePathMap               map[string]*NodePathMap
+	AhuhForkReservedDir       map[string]string
+	CmdTimeoutSeconds         int
 }
 
 func NewProvisioner(stopCh chan struct{}, kubeClient *clientset.Clientset,
@@ -195,6 +200,26 @@ func (p *LocalPathProvisioner) getRandomPathOnNode(node string) (string, error) 
 	return path, nil
 }
 
+func (p *LocalPathProvisioner) getAhuhForkDirParams() (string, string, error) {
+	p.configMutex.RLock()
+	defer p.configMutex.RUnlock()
+
+	if p.config == nil {
+		return "", fmt.Errorf("no valid config available")
+	}
+
+	c := p.config
+	rdMap := c.AhuhForkReservedDir
+	if rdMap != nil {
+		if rdMap[AhuhForkReservedDirPrefix] == "" {
+			logrus.Debugf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
+			return "", rdMap[AhuhForkReservedSubDir], fmt.Errorf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
+		else {
+			return rdMap[AhuhForkReservedDirPrefix], rdMap[AhuhForkReservedSubDir], nil
+		}
+	}
+}
+
 func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v1.PersistentVolume, error) {
 	pvc := opts.PVC
 	if pvc.Spec.Selector != nil {
@@ -215,6 +240,12 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 		return nil, err
 	}
 	
+	// Get reserved dir prefix and sub-dir values from the ConfigMap
+	reservedDirPrefix, reservedSubDir, err := p.getAhuhForkDirParams()
+	if err != nil {
+		return nil, err
+	}
+	
 	// Annotations to pass from PVC to PV
 	pvAnnotations := make(map[string]string)
 
@@ -223,19 +254,20 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 		pvAnnotations[PVDirKeepAnnotation] = pvDirKeep
 	}
 
-	var name, folderName string
-	if pvDirPrefix, annotationExists := pvc.Annotations[PVDirPrefixAnnotation]; annotationExists {
-		// Persistent volume with specified prefix dir
-		pvAnnotations[PVDirPrefixAnnotation] = pvDirPrefix
-		name = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "-")
-		folderName = strings.Join([]string{pvDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	var name, parentFolderName, folderName string
+	if pvDirReserve, annotationExists := pvc.Annotations[PVDirReserveAnnotation]; annotationExists {
+		// Persistent volume with reserved dir
+		pvAnnotations[PVDirReserveAnnotation] = pvDirReserve
+		name = strings.Join([]string{reservedDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "-")
+		parentFolderName = reservedSubDir
+		folderName = strings.Join([]string{reservedDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "_")
 	} else {
 		// Standard volume (non-persistent)
 		name = opts.PVName
 		folderName = strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
 	}
 
-	path := filepath.Join(basePath, folderName)
+	path := filepath.Join(basePath, parentFolderName, folderName)
 	logrus.Infof("Creating volume %v at %v:%v", name, node.Name, path)
 
 	storage := pvc.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
@@ -246,7 +278,7 @@ func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v
 		Mode:        *pvc.Spec.VolumeMode,
 		SizeInBytes: storage.Value(),
 		Node:        node.Name,
-		DirPrefix:   pvAnnotations[PVDirPrefixAnnotation],
+		DirReserve:  pvAnnotations[PVDirReserveAnnotation],
 		DirKeep:     pvAnnotations[PVDirKeepAnnotation],
 	}); err != nil {
 		return nil, err
@@ -317,7 +349,7 @@ func (p *LocalPathProvisioner) Delete(pv *v1.PersistentVolume) (err error) {
 			Mode:        *pv.Spec.VolumeMode,
 			SizeInBytes: storage.Value(),
 			Node:        node,
-			DirPrefix:   pv.Annotations[PVDirPrefixAnnotation],
+			DirReserve:  pv.Annotations[PVDirReserveAnnotation],
 			DirKeep:     pv.Annotations[PVDirKeepAnnotation],
 		}); err != nil {
 			logrus.Infof("clean up volume %v failed: %v", pv.Name, err)
@@ -376,7 +408,7 @@ type volumeOptions struct {
 	Mode        v1.PersistentVolumeMode
 	SizeInBytes int64
 	Node        string
-	DirPrefix   string
+	DirReserve  string
 	DirKeep     string
 }
 
@@ -445,7 +477,7 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 		{Name: envVolDir, Value: filepath.Join(parentDir, volumeDir)},
 		{Name: envVolMode, Value: string(o.Mode)},
 		{Name: envVolSize, Value: strconv.FormatInt(o.SizeInBytes, 10)},
-		{Name: envVolDirPrefix, Value: string(o.DirPrefix)},
+		{Name: envVolDirReserve, Value: string(o.DirReserve)},
 		{Name: envVolDirKeep, Value: string(o.DirKeep)},
 	}
 
@@ -575,6 +607,10 @@ func canonicalizeConfig(data *ConfigData) (cfg *Config, err error) {
 			}
 			npMap.Paths[path] = struct{}{}
 		}
+	}
+	cfg.AhuhForkReservedDir := make(map[string]string)
+	for key, value := range data.AhuhForkReservedDir {
+		cfg.AhuhForkReservedDir[key] = value
 	}
 	if data.CmdTimeoutSeconds > 0 {
 		cfg.CmdTimeoutSeconds = data.CmdTimeoutSeconds
