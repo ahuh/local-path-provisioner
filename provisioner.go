@@ -214,7 +214,7 @@ func (p *LocalPathProvisioner) getAhuhForkDirParams() (string, string, error) {
 		if rdMap[AhuhForkReservedDirPrefix] == "" {
 			logrus.Debugf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
 			return "", rdMap[AhuhForkReservedSubDir], fmt.Errorf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
-		else {
+		} else {
 			return rdMap[AhuhForkReservedDirPrefix], rdMap[AhuhForkReservedSubDir], nil
 		}
 	}
