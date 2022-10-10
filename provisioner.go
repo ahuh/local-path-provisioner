@@ -205,7 +205,7 @@ func (p *LocalPathProvisioner) getAhuhForkDirParams() (string, string, error) {
 	defer p.configMutex.RUnlock()
 
 	if p.config == nil {
-		return "", fmt.Errorf("no valid config available")
+		return "", "", fmt.Errorf("no valid config available")
 	}
 
 	c := p.config
@@ -218,6 +218,7 @@ func (p *LocalPathProvisioner) getAhuhForkDirParams() (string, string, error) {
 			return rdMap[AhuhForkReservedDirPrefix], rdMap[AhuhForkReservedSubDir], nil
 		}
 	}
+	return "", "", nil
 }
 
 func (p *LocalPathProvisioner) Provision(opts pvController.ProvisionOptions) (*v1.PersistentVolume, error) {
