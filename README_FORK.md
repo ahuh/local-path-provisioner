@@ -147,8 +147,8 @@ REPO=ahuh make
 **Additional tagging procedure**:
 ```bash
 # Add tags for '<last-git-tag-name>' (without arch) and for 'latest'
-docker tag local-path-provisioner:<last-git-tag-name> ahuh/local-path-provisioner:<last-git-tag-name>
-docker tag local-path-provisioner:latest ahuh/local-path-provisioner:latest
+docker tag ahuh/local-path-provisioner:<last-git-tag-name>-<arch> ahuh/local-path-provisioner:<last-git-tag-name>
+docker tag ahuh/local-path-provisioner:<last-git-tag-name>-<arch> ahuh/local-path-provisioner:latest
 ```
 
 **Push procedure**:
