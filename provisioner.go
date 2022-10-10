@@ -608,7 +608,7 @@ func canonicalizeConfig(data *ConfigData) (cfg *Config, err error) {
 			npMap.Paths[path] = struct{}{}
 		}
 	}
-	cfg.AhuhForkReservedDir := make(map[string]string)
+	cfg.AhuhForkReservedDir = make(map[string]string)
 	for key, value := range data.AhuhForkReservedDir {
 		cfg.AhuhForkReservedDir[key] = value
 	}
