@@ -32,7 +32,7 @@ const (
 
 	NodeDefaultNonListedNodes = "DEFAULT_PATH_FOR_NON_LISTED_NODES"
 
-	AhuhForkReservedDirPrefix = "prefixDir"
+	AhuhForkReservedDirPrefix = "dirPrefix"
 	AhuhForkReservedSubDir = "subDir"
 
 	PVDirReserveAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-reserve"

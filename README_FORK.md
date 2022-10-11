@@ -106,8 +106,6 @@ Example:
   * PV name: `pv-my-namespace-my-volume-pvc`
   * PV path: `<basePath>/reserved/pv_my-namespace-my_volume-pvc`
 
-
-
 ## 2. HOW-TOs
 
 ### 2.1. Clone repo under Windows
