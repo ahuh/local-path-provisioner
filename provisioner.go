@@ -35,8 +35,8 @@ const (
 	AhuhForkReservedDirPrefix = "dirPrefix"
 	AhuhForkReservedSubDir = "subDir"
 
-	PVDirReserveAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-reserve"
-	PVDirKeepAnnotation = "local-path-provisioner/ahuh-fork/pv-dir-keep"
+	PVDirReserveAnnotation = "ahuh-fork-local-path-provisioner/pv-dir-reserve"
+	PVDirKeepAnnotation = "ahuh-fork-local-path-provisioner/pv-dir-keep"
 
 	helperScriptDir     = "/script"
 	helperDataVolName   = "data"

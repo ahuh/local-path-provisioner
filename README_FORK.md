@@ -13,8 +13,8 @@ With the base repo (v0.0.22), a PV generated from a PVC with a "Local Path Provi
 * PV path: `<basePath>/pvc-<GUID>_<namespace>_<pvc-name>`
 
 This fork adds two optional annotations available on PVC with a "Local Path Provisioner" storage class:
-*  `local-path-provisioner/ahuh-fork/pv-dir-reserve`: if present and equal to "true", will be used to generate a **reservable PV dir** for this PVC. This allows to keep persistent storage dirs, that may be reused between many deployments
-*  `local-path-provisioner/ahuh-fork/pv-dir-keep`: if present and equal to "true", should be used to prevent dir deletion in `teardown` script (to implement in the ConfigMap)
+*  `ahuh-fork-local-path-provisioner/pv-dir-reserve`: if present and equal to "true", will be used to generate a **reservable PV dir** for this PVC. This allows to keep persistent storage dirs, that may be reused between many deployments
+*  `ahuh-fork-local-path-provisioner/pv-dir-keep`: if present and equal to "true", should be used to prevent dir deletion in `teardown` script (to implement in the ConfigMap)
 
 In addition to the PVC configuration, the ConfigMap file `config.json` has two new parameters:
 * `ahuhForkReservedDir.dirPrefix`: prefix to add to the target dir name, for all generated reservable dirs
@@ -30,8 +30,8 @@ Moreover, two new environment variables are available for scripts `setup` and `t
 
 | Environment variable | Description |
 |----------------------|-------------|
-| VOL_DIR_RESERVE | Value of the annotation `local-path-provisioner/ahuh-fork/pv-dir-reserve` passed as a *pass-through* from the PVC to the current PV. *May* be used in scripts. |
-| VOL_DIR_KEEP | Value of the annotation `local-path-provisioner/ahuh-fork/pv-dir-keep` passed as a *pass-through* from the PVC to the current PV. **Should** be used in scripts, in particular to prevent dir deletion at `teardown`. |
+| VOL_DIR_RESERVE | Value of the annotation `ahuh-fork-local-path-provisioner/pv-dir-reserve` passed as a *pass-through* from the PVC to the current PV. *May* be used in scripts. |
+| VOL_DIR_KEEP | Value of the annotation `ahuh-fork-local-path-provisioner/pv-dir-keep` passed as a *pass-through* from the PVC to the current PV. **Should** be used in scripts, in particular to prevent dir deletion at `teardown`. |
 
 Example:
 * Customized ConfigMap to use to implement *reservable dirs* (see `config.json`) and *dirs to keep* (see `teardown`):
@@ -91,8 +91,8 @@ Example:
     name: my-volume-pvc
     namespace: my-namespace
     annotations:
-      local-path-provisioner/ahuh-fork/pv-dir-reserve: "true"
-      local-path-provisioner/ahuh-fork/pv-dir-keep: "true"
+      ahuh-fork-local-path-provisioner/pv-dir-reserve: "true"
+      ahuh-fork-local-path-provisioner/pv-dir-keep: "true"
   spec:
     accessModes:
     - ReadWriteOnce
