@@ -71,7 +71,7 @@ Example:
       #!/bin/sh
       set -eu
       # Delete dir only if the dir keep annotation was not set on PVC / PV !
-      [[ "$VOL_DIR_KEEP" != "true" ]] && rm -rf "$VOL_DIR"
+      if [ "$VOL_DIR_KEEP" != "true" ]; then rm -rf "$VOL_DIR"; fi
     helperPod.yaml: |-
       apiVersion: v1
       kind: Pod
