@@ -335,7 +335,7 @@ func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.
 	// Get reserved dir prefix and sub-dir values from the ConfigMap
 	reservedDirPrefix, reservedSubDir, err := p.getAhuhForkDirParams()
 	if err != nil {
-		return nil, err
+		return nil, pvController.ProvisioningFinished, err
 	}
 	
 	// Annotations to pass from PVC to PV
