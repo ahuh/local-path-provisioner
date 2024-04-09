@@ -1,0 +1,169 @@
+# Local Path Provisioner - FORK README
+
+- [Local Path Provisioner - FORK README](#local-path-provisioner---fork-readme)
+  - [1. Why this fork ?](#1-why-this-fork-)
+  - [2. HOW-TOs](#2-how-tos)
+    - [2.1. Clone repo under Windows](#21-clone-repo-under-windows)
+    - [2.2. Build and push the docker image](#22-build-and-push-the-docker-image)
+
+## 1. Why this fork ?
+
+With the base repo (v0.0.26), a PV generated from a PVC with a "Local Path Provisioner" storage class will always have a new generated name:
+* PV name: `pvc-<GUID>`
+* PV path: `<basePath>/pvc-<GUID>_<namespace>_<pvc-name>`
+
+This fork adds support for two optional annotations on PVC with a "Local Path Provisioner" storage class:
+*  `ahuh-fork-local-path-provisioner/pv-dir-reserve`: if present and equal to "true", will be used to generate a **reservable PV dir** for this PVC. This allows to keep persistent storage dirs, that may be reused between many deployments
+*  `ahuh-fork-local-path-provisioner/pv-dir-keep`: if present and equal to "true", should be used to prevent dir deletion in `teardown` script (to implement in the ConfigMap)
+
+In addition to the PVC configuration, the ConfigMap file `config.json` has two new parameters:
+* `ahuhForkReservedDir.dirPrefix`: prefix to add to the target dir name, for all generated reservable dirs
+* `ahuhForkReservedDir.subDir`: sub-dir under the base path, to store all generated reservable dirs in
+
+As a result, a PV generated with this component will have these characteristics:
+* PV name: `<reserved-dir-prefix>-<namespace>-<pvc-name>`
+* PV path: `<basePath>/<reserved-sud-dir>/<reserved-dir-prefix>_<namespace>_<pvc-name>`
+
+**WARNING: you are responsible for the uniqueness of the generated PV name**
+
+Moreover, two new environment variables are available for scripts `setup` and `teardown`:
+
+| Environment variable | Description |
+|----------------------|-------------|
+| VOL_DIR_RESERVE | Value of the *pass-through* annotation `ahuh-fork-local-path-provisioner/pv-dir-reserve` passed from the PVC to the current PV. *May* be used in scripts. |
+| VOL_DIR_KEEP | Value of the *pass-through* annotation `ahuh-fork-local-path-provisioner/pv-dir-keep` passed from the PVC to the current PV. **Should** be used in scripts, in particular to prevent dir deletion at `teardown`. |
+
+Example:
+* Customized ConfigMap to use to implement *reservable dirs* (see `config.json`) and *dirs to keep* (see `teardown`):
+  ```yaml
+  kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: local-path-config
+    namespace: local-path-storage
+  data:
+    config.json: |-
+      {
+        "nodePathMap":[
+          {
+            "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
+            "paths":["/opt/local-path-provisioner"]
+          },
+          {
+            "node":"yasker-lp-dev1",
+            "paths":["/opt/local-path-provisioner", "/data1"]
+          },
+          {
+            "node":"yasker-lp-dev3",
+            "paths":[]
+          }
+        ],
+        "ahuhForkReservedDir": {
+          "dirPrefix": "pv",
+          "subDir": "reserved"
+        }
+      }
+    setup: |-
+      #!/bin/sh
+      set -eu
+      mkdir -m 0777 -p "$VOL_DIR"
+    teardown: |-
+      #!/bin/sh
+      set -eu
+      # Delete dir only if the dir keep annotation was not set on PVC / PV !
+      if [ "$VOL_DIR_KEEP" != "true" ]; then rm -rf "$VOL_DIR"; fi
+    helperPod.yaml: |-
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: helper-pod
+      spec:
+        priorityClassName: system-node-critical
+        tolerations:
+          - key: node.kubernetes.io/disk-pressure
+            operator: Exists
+            effect: NoSchedule
+        containers:
+        - name: helper-pod
+          image: busybox
+  ```
+  * *[NEW]* Other possible customizations (see main README for details):
+    * In `config.json`, use `sharedFileSystemPath` instead of `nodePathMap` to use a filesystem that is mounted on all nodes at the same time (e.g. NFS). In this case all access modes are supported: `ReadWriteOnce`, `ReadOnlyMany` and `ReadWriteMany` for storage claims.
+    * In addition `volumeBindingMode: Immediate` can be used in StorageClass definition.
+
+* PVC using a "Local Path Provisioner" storage class named `local-path`:
+  ```yaml
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: my-volume-pvc
+    namespace: my-namespace
+    annotations:
+      ahuh-fork-local-path-provisioner/pv-dir-reserve: "true"
+      ahuh-fork-local-path-provisioner/pv-dir-keep: "true"
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    storageClassName: local-path
+    resources:
+      requests:
+        storage: 128Mi
+  ```
+  * *[NEW]* Other possible customizations (see main README for details):
+    * You may change the generated PV volume type from `hostPath` to `local`, by specifying annotations `volumeType` (on PVC) and / or `defaultVolumeType` (on StorageClass). Local volume should be preferred in multi-node environment (with `sharedFileSystemPath` in `config.json`) in order to remove dependencies between storage and host.
+
+* The PV generated by this PVC will have these **reserved name and path**:
+  * PV name: `pv-my-namespace-my-volume-pvc`
+  * PV path: `<basePath>/reserved/pv_my-namespace_my-volume-pvc`
+
+## 2. HOW-TOs
+
+### 2.1. Clone repo under Windows
+
+* Clone the repository from github
+* Under Windows, cloned files might have CRLF end-of-line sequences, inducing errors in scripts execution
+* To solve the problem, run these commands in the repo dir, just after the `git clone` command:
+  ```bash
+  git config core.autocrlf input
+  git rm --cached -r .
+  git reset --hard
+  git pull
+  ```
+
+### 2.2. Build and push the docker image
+
+*Prerequisites*:
+* Execute from bash under Linux or WSL2 bash under Windows
+* Docker installed
+* Internet connection available
+* A git tag must be set on the branch to build (will be used to tag the docker image)
+* The docker hub repo must already exist: in our case `ahuh/local-path-provisioner`
+
+**Build procedure**:
+```bash
+# Install make (debian-based distros)
+sudo apt install make
+
+# Launch the make at the root of repo
+# (replace 'ahuh' with the docker hub repo owner)
+REPO=ahuh make
+# => the docker image "ahuh/local-path-provisioner:<last-git-tag-name>-<arch>" is available:
+#    - <last-git-tag-name> is the last tag on the git branch that has been built
+#    - <arch> is automatically detected
+```
+
+**Additional tagging procedure**:
+```bash
+# Add tags for '<last-git-tag-name>' (without arch) and for 'latest'
+docker tag ahuh/local-path-provisioner:<last-git-tag-name>-<arch> ahuh/local-path-provisioner:<last-git-tag-name>
+docker tag ahuh/local-path-provisioner:<last-git-tag-name>-<arch> ahuh/local-path-provisioner:latest
+```
+
+**Push procedure**:
+```bash
+# Login as the docker hub user with credentials on the docker hub repo
+docker login
+
+# Push the docker image with all its tags to docker hub
+docker push --all-tags ahuh/local-path-provisioner
+```

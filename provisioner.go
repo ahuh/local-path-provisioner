@@ -37,6 +37,14 @@ const (
 
 	NodeDefaultNonListedNodes = "DEFAULT_PATH_FOR_NON_LISTED_NODES"
 
+	// ------------ Ahuh Fork - Start ------------
+	AhuhForkReservedDirPrefix = "dirPrefix"
+	AhuhForkReservedSubDir = "subDir"
+
+	PVDirReserveAnnotation = "ahuh-fork-local-path-provisioner/pv-dir-reserve"
+	PVDirKeepAnnotation = "ahuh-fork-local-path-provisioner/pv-dir-keep"
+	// ------------- Ahuh Fork - End -------------
+
 	helperScriptDir     = "/script"
 	helperDataVolName   = "data"
 	helperScriptVolName = "script"
@@ -44,6 +52,11 @@ const (
 	envVolDir  = "VOL_DIR"
 	envVolMode = "VOL_MODE"
 	envVolSize = "VOL_SIZE_BYTES"
+
+	// ------------ Ahuh Fork - Start ------------
+	envVolDirReserve = "VOL_DIR_RESERVE"
+	envVolDirKeep    = "VOL_DIR_KEEP"
+	// ------------- Ahuh Fork - End -------------
 )
 
 const (
@@ -87,6 +100,9 @@ type ConfigData struct {
 	SharedFileSystemPath string             `json:"sharedFileSystemPath,omitempty"`
 	SetupCommand         string             `json:"setupCommand,omitempty"`
 	TeardownCommand      string             `json:"teardownCommand,omitempty"`
+	// ------------ Ahuh Fork - Start ------------
+	AhuhForkReservedDir  map[string]string  `json:"ahuhForkReservedDir,omitempty"`
+	// ------------- Ahuh Fork - End -------------
 }
 
 type NodePathMap struct {
@@ -99,6 +115,9 @@ type Config struct {
 	SharedFileSystemPath string
 	SetupCommand         string
 	TeardownCommand      string
+	// ------------ Ahuh Fork - Start ------------
+	AhuhForkReservedDir  map[string]string
+	// ------------- Ahuh Fork - End -------------
 }
 
 func NewProvisioner(ctx context.Context, kubeClient *clientset.Clientset,
@@ -246,6 +265,29 @@ func (p *LocalPathProvisioner) isSharedFilesystem() (bool, error) {
 	return false, fmt.Errorf("both nodePathMap and sharedFileSystemPath are unconfigured")
 }
 
+// ------------ Ahuh Fork - Start ------------
+func (p *LocalPathProvisioner) getAhuhForkDirParams() (string, string, error) {
+	p.configMutex.RLock()
+	defer p.configMutex.RUnlock()
+
+	if p.config == nil {
+		return "", "", fmt.Errorf("no valid config available")
+	}
+
+	c := p.config
+	rdMap := c.AhuhForkReservedDir
+	if rdMap != nil {
+		if rdMap[AhuhForkReservedDirPrefix] == "" {
+			logrus.Debugf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
+			return "", rdMap[AhuhForkReservedSubDir], fmt.Errorf("config doesn't contain value for ahuhForkReservedDir DirPrefix")
+		} else {
+			return rdMap[AhuhForkReservedDirPrefix], rdMap[AhuhForkReservedSubDir], nil
+		}
+	}
+	return "", "", nil
+}
+// ------------- Ahuh Fork - End -------------
+
 func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.ProvisionOptions) (*v1.PersistentVolume, pvController.ProvisioningState, error) {
 	pvc := opts.PVC
 	node := opts.SelectedNode
@@ -284,10 +326,45 @@ func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.
 		return nil, pvController.ProvisioningFinished, err
 	}
 
-	name := opts.PVName
-	folderName := strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	// ----------- Ahuh Fork - Replace -----------
+	//name := opts.PVName
+	//folderName := strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
 
-	path := filepath.Join(basePath, folderName)
+	//path := filepath.Join(basePath, folderName)
+	// ------------ Ahuh Fork - Start ------------
+	// Get reserved dir prefix and sub-dir values from the ConfigMap
+	reservedDirPrefix, reservedSubDir, err := p.getAhuhForkDirParams()
+	if err != nil {
+		return nil, err
+	}
+	
+	// Annotations to pass from PVC to PV
+	pvAnnotations := make(map[string]string)
+	// Add annotations from original code
+	pvAnnotations[nodeNameAnnotationKey] = nodeName
+
+	// Add annotations from fork code
+	if pvDirKeep, annotationExists := pvc.Annotations[PVDirKeepAnnotation]; annotationExists {
+		// Keep dir at teardown
+		pvAnnotations[PVDirKeepAnnotation] = pvDirKeep
+	}
+
+	var name, parentFolderName, folderName string
+	if pvDirReserve, annotationExists := pvc.Annotations[PVDirReserveAnnotation]; annotationExists {
+		// Persistent volume with reserved dir
+		pvAnnotations[PVDirReserveAnnotation] = pvDirReserve
+		name = strings.Join([]string{reservedDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "-")
+		parentFolderName = reservedSubDir
+		folderName = strings.Join([]string{reservedDirPrefix, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	} else {
+		// Standard volume (non-persistent)
+		name = opts.PVName
+		folderName = strings.Join([]string{name, opts.PVC.Namespace, opts.PVC.Name}, "_")
+	}
+
+	path := filepath.Join(basePath, parentFolderName, folderName)
+	// ------------- Ahuh Fork - End -------------
+
 	if nodeName == "" {
 		logrus.Infof("Creating volume %v at %v", name, path)
 	} else {
@@ -307,6 +384,10 @@ func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.
 		Mode:        *pvc.Spec.VolumeMode,
 		SizeInBytes: storage.Value(),
 		Node:        nodeName,
+		// ------------ Ahuh Fork - Start ------------
+		DirReserve:  pvAnnotations[PVDirReserveAnnotation],
+		DirKeep:     pvAnnotations[PVDirKeepAnnotation],
+		// ------------- Ahuh Fork - End -------------
 	}); err != nil {
 		return nil, pvController.ProvisioningFinished, err
 	}
@@ -359,7 +440,11 @@ func (p *LocalPathProvisioner) Provision(ctx context.Context, opts pvController.
 	return &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			Annotations: map[string]string{nodeNameAnnotationKey: nodeName},
+			// ----------- Ahuh Fork - Replace -----------
+			//Annotations: map[string]string{nodeNameAnnotationKey: nodeName},
+			// ------------ Ahuh Fork - Start ------------
+			Annotations: pvAnnotations,
+			// ------------- Ahuh Fork - End -------------
 		},
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeReclaimPolicy: *opts.StorageClass.ReclaimPolicy,
@@ -401,6 +486,10 @@ func (p *LocalPathProvisioner) Delete(ctx context.Context, pv *v1.PersistentVolu
 			Mode:        *pv.Spec.VolumeMode,
 			SizeInBytes: storage.Value(),
 			Node:        node,
+			// ------------ Ahuh Fork - Start ------------
+			DirReserve:  pv.Annotations[PVDirReserveAnnotation],
+			DirKeep:     pv.Annotations[PVDirKeepAnnotation],
+			// ------------- Ahuh Fork - End -------------
 		}); err != nil {
 			logrus.Infof("clean up volume %v failed: %v", pv.Name, err)
 			return err
@@ -473,6 +562,10 @@ type volumeOptions struct {
 	Mode        v1.PersistentVolumeMode
 	SizeInBytes int64
 	Node        string
+	// ------------ Ahuh Fork - Start ------------
+	DirReserve  string
+	DirKeep     string
+	// ------------- Ahuh Fork - End -------------
 }
 
 func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, o volumeOptions) (err error) {
@@ -555,6 +648,10 @@ func (p *LocalPathProvisioner) createHelperPod(action ActionType, cmd []string, 
 		{Name: envVolDir, Value: filepath.Join(parentDir, volumeDir)},
 		{Name: envVolMode, Value: string(o.Mode)},
 		{Name: envVolSize, Value: strconv.FormatInt(o.SizeInBytes, 10)},
+		// ------------ Ahuh Fork - Start ------------
+		{Name: envVolDirReserve, Value: string(o.DirReserve)},
+		{Name: envVolDirKeep, Value: string(o.DirKeep)},
+		// ------------- Ahuh Fork - End -------------
 	}
 
 	// use different name for helper pods
@@ -698,6 +795,12 @@ func canonicalizeConfig(data *ConfigData) (cfg *Config, err error) {
 			npMap.Paths[path] = struct{}{}
 		}
 	}
+	// ------------ Ahuh Fork - Start ------------
+	cfg.AhuhForkReservedDir = make(map[string]string)
+	for key, value := range data.AhuhForkReservedDir {
+		cfg.AhuhForkReservedDir[key] = value
+	}
+	// ------------- Ahuh Fork - End -------------
 	if data.CmdTimeoutSeconds > 0 {
 		cfg.CmdTimeoutSeconds = data.CmdTimeoutSeconds
 	} else {
