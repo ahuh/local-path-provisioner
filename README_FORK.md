@@ -89,7 +89,7 @@ Example:
   ```
   * *[NEW]* Other possible customizations (see main README for details):
     * In `config.json`, use `sharedFileSystemPath` instead of `nodePathMap` to use a filesystem that is mounted on all nodes at the same time (e.g. NFS). In this case all access modes are supported: `ReadWriteOnce`, `ReadOnlyMany` and `ReadWriteMany` for storage claims.
-    * In addition `volumeBindingMode: Immediate` can be used in StorageClass definition.
+    * In addition `volumeBindingMode: Immediate` can be used in StorageClass definition. WARNING: do not use `Immediate` if you have not declared a `sharedFileSystemPath` in the configuration (for `nodePathMap`, you need to wait for the first consumer, to know which node will host the volume)
 
 * PVC using a "Local Path Provisioner" storage class named `local-path`:
   ```yaml
